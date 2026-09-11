@@ -1,0 +1,8 @@
+node_modules
+.git
+carga
+receptor-alertas
+grafana
+prometheus
+alertmanager
+README.md

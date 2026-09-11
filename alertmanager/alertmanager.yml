@@ -1,0 +1,12 @@
+route:
+  receiver: receptor-alertas
+  group_by: ["alertname"]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 1h
+
+receivers:
+  - name: receptor-alertas
+    webhook_configs:
+      - url: http://receptor-alertas:9099/
+        send_resolved: true
