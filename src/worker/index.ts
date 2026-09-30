@@ -1,11 +1,19 @@
 import http from 'node:http';
+import { ROOT_CONTEXT, SpanKind, propagation } from '@opentelemetry/api';
 import { atualizarStatusPedido } from '../db/consultas';
 import { esperarBanco, fecharPool } from '../db/pool';
 import { migrar } from '../db/migracao';
-import { consumirPedido, criarConexaoRedis } from '../fila/fila';
-import { log } from '../telemetria/log';
+import {
+  NOME_DA_FILA,
+  consumirPedido,
+  criarConexaoRedis,
+  type ContextoDeTrace,
+} from '../fila/fila';
+import { comPedido, log } from '../telemetria/log';
 import { TIPO_DE_CONTEUDO, coletar } from '../telemetria/metricas';
+import { registrarExcecao, tracer } from '../telemetria/rastreamento';
 import { decidirStatusDoPedido } from './conciliacao';
+import { pedidosConfirmados } from './metricas-negocio';
 
 const porta = Number(process.env.WORKER_PORT ?? process.env.PORT ?? 8081);
 
@@ -41,12 +49,54 @@ async function processarMensagem(mensagem: Record<string, unknown>): Promise<voi
   const clienteId = String(mensagem.cliente_id);
   const valorTotal = Number(mensagem.valor_total);
 
-  log.info('mensagem do pedido ' + pedidoId + ' recebida da fila');
+  // Continua o trace de quem publicou. A base e o contexto raiz, nao o ativo do
+  // worker: assim o span nasce filho do pedido.criar, e nao de algo local.
+  const contextoDoProdutor = propagation.extract(
+    ROOT_CONTEXT,
+    (mensagem.contexto_trace ?? {}) as ContextoDeTrace
+  );
 
-  const status = await decidirStatusDoPedido(clienteId, valorTotal);
-  await atualizarStatusPedido(pedidoId, status);
+  const atributos = {
+    'pedido.id': pedidoId,
+    'cliente.id': clienteId,
+    'pedido.valor_total': valorTotal,
+    'messaging.system': 'redis',
+    'messaging.destination.name': NOME_DA_FILA,
+    'messaging.operation.type': 'process',
+  };
 
-  log.info('pedido ' + pedidoId + ' ficou ' + status);
+  await tracer.startActiveSpan(
+    'pedido.processar',
+    { kind: SpanKind.CONSUMER, attributes: atributos },
+    contextoDoProdutor,
+    (span) =>
+      comPedido(pedidoId, async () => {
+        try {
+          log.info('mensagem do pedido ' + pedidoId + ' recebida da fila', {
+            cliente_id: clienteId,
+            valor_total: valorTotal,
+          });
+
+          const status = await decidirStatusDoPedido(clienteId, valorTotal);
+          await atualizarStatusPedido(pedidoId, status);
+          span.setAttribute('pedido.status', status);
+          if (status === 'confirmado') {
+            pedidosConfirmados.inc();
+          }
+
+          log.info('pedido ' + pedidoId + ' ficou ' + status, {
+            status,
+            cliente_id: clienteId,
+            valor_total: valorTotal,
+          });
+        } catch (erro) {
+          registrarExcecao(erro, 'erro ao processar pedido');
+          throw erro;
+        } finally {
+          span.end();
+        }
+      })
+  );
 }
 
 async function iniciar(): Promise<void> {
@@ -78,7 +128,7 @@ async function iniciar(): Promise<void> {
         await processarMensagem(mensagem);
       }
     } catch (erro) {
-      log.error('erro ao ler a fila: ' + (erro as Error).message);
+      registrarExcecao(erro, 'erro ao ler a fila');
       await new Promise((resolver) => setTimeout(resolver, 1000));
     }
   }

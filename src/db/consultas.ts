@@ -1,3 +1,4 @@
+import { registrarExcecao } from '../telemetria/rastreamento';
 import { pool } from './pool';
 
 export type Produto = {
@@ -107,6 +108,7 @@ export async function criarPedido(
 
     return { id: pedidoId, valor_total: valorTotal };
   } catch (erro) {
+    registrarExcecao(erro, 'erro ao gravar pedido, transacao desfeita');
     await cliente.query('ROLLBACK');
     throw erro;
   } finally {

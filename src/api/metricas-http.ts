@@ -18,8 +18,14 @@ export function medirRequisicoes(
   const encerrarMedicao = duracaoDasRequisicoes.startTimer();
 
   resposta.on('finish', () => {
+    // O label e o template da rota (/produtos/:id), nunca o caminho concreto
+    // (/produtos/42): cada id viraria uma serie nova. Sem rota casada (404 do
+    // express) o valor e fixo, pelo mesmo motivo.
+    const rotaCasada = requisicao.route?.path;
+    const rota = rotaCasada ? requisicao.baseUrl + rotaCasada : 'nao_mapeada';
+
     encerrarMedicao({
-      route: requisicao.path,
+      route: rota,
       method: requisicao.method,
       status: String(resposta.statusCode),
     });

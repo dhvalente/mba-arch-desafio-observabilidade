@@ -16,7 +16,9 @@ export async function esperarBanco(tentativas = 30): Promise<void> {
       await pool.query('SELECT 1');
       return;
     } catch (erro) {
-      log.warn('banco ainda nao respondeu, tentativa ' + tentativa);
+      log.warn('banco ainda nao respondeu, tentativa ' + tentativa, {
+        motivo: (erro as Error).message,
+      });
       await new Promise((resolver) => setTimeout(resolver, 1000));
     }
   }
