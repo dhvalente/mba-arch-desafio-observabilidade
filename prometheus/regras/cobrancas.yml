@@ -1,0 +1,27 @@
+# SLI: proporcao de cobrancas processadas sem falha tecnica
+#   (aprovada + recusada) / total. Recusa e resposta legitima do processador;
+#   falha e o processador nao conseguir responder.
+# SLO: 99% das cobrancas sem falha, em janela movel de 30 dias.
+# Error budget: 1% das cobrancas do periodo podem falhar.
+#
+# Limiar: burn rate de 14.4, o ritmo que consome 2% do budget de 30 dias em 1h
+# (14.4 = 0.02 * 720h). Taxa de falha que corresponde a esse ritmo:
+#   14.4 * (1 - 0.99) = 0.144, ou seja, 14.4% das cobrancas falhando.
+# A conta completa esta no README, secao "SLO e alerta".
+groups:
+  - name: slo-cobrancas
+    rules:
+      - alert: FalhaEmCobrancas
+        expr: |
+          (
+            sum(rate(cobrancas_processadas_total{resultado="falha"}[5m]))
+            /
+            sum(rate(cobrancas_processadas_total[5m]))
+          ) > (14.4 * (1 - 0.99))
+        for: 1m
+        labels:
+          severity: page
+          slo: cobrancas-sem-falha-99
+        annotations:
+          summary: "Cobrancas falhando acima do ritmo que o SLO tolera"
+          description: "{{ $value | humanizePercentage }} das cobrancas dos ultimos 5m falharam. O limiar de 14.4% equivale a queimar 2% do error budget mensal (SLO 99%) em 1h."
